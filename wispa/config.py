@@ -16,6 +16,14 @@ class CleanupConfig:
     enabled: bool = True
     model: str = "qwen3:4b-instruct"
     timeout: float = 6.0
+    # Skip the LLM when the transcript has no filler/self-correction cues.
+    # Disable if dictionary repair matters more than speed on clean sentences.
+    skip_when_clean: bool = True
+
+
+@dataclass
+class DictionaryConfig:
+    terms: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -30,6 +38,7 @@ class Config:
     min_duration: float = 0.3
     asr: AsrConfig = field(default_factory=AsrConfig)
     cleanup: CleanupConfig = field(default_factory=CleanupConfig)
+    dictionary: DictionaryConfig = field(default_factory=DictionaryConfig)
     injection: InjectionConfig = field(default_factory=InjectionConfig)
 
 
@@ -44,5 +53,6 @@ def load(path: Path = CONFIG_PATH) -> Config:
         min_duration=data.get("min_duration", 0.3),
         asr=AsrConfig(**data.get("asr", {})),
         cleanup=CleanupConfig(**data.get("cleanup", {})),
+        dictionary=DictionaryConfig(**data.get("dictionary", {})),
         injection=InjectionConfig(**data.get("injection", {})),
     )

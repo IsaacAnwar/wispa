@@ -7,12 +7,18 @@ A local, free Wispr Flow: hold **Fn**, speak, release — polished text appears 
 ```
 hold Fn ──▶ record mic (16kHz)
 release ──▶ Parakeet V3 ASR (MLX, on-device, ~100ms)
-        ──▶ qwen3:4b-instruct via Ollama (strips "um"s, applies self-corrections)
-        ──▶ inserted at cursor via macOS Accessibility API
-            (clipboard + Cmd+V fallback for apps that don't support AX)
+        ──▶ skip-gate: no fillers/corrections detected? insert raw (0ms)
+        ──▶ else qwen3:4b-instruct via Ollama (strips "um"s, applies
+            self-corrections, fixes domain terms from [dictionary]);
+            long dictations split into parallel chunks, output streamed
+        ──▶ streamed to the cursor via macOS Accessibility API as it
+            generates (clipboard + Cmd+V fallback for non-AX apps)
 ```
 
-If Ollama isn't running you still get the raw Parakeet transcript (which already has punctuation) — cleanup just switches back on when Ollama is up.
+First text appears ~300ms after you release the key. If Ollama isn't running you still get the raw Parakeet transcript (which already has punctuation) — cleanup just switches back on when Ollama is up.
+
+For parallel chunk cleanup, the Ollama server needs `OLLAMA_NUM_PARALLEL=4`
+(set via its launchd plist / environment; without it chunks serialize).
 
 ## Setup
 
@@ -59,7 +65,7 @@ Edit `config.toml`:
 | `wispa/hotkey.py` | Quartz event tap watching the Fn modifier flag system-wide |
 | `wispa/recorder.py` | sounddevice mic capture while key is held |
 | `wispa/transcriber.py` | Parakeet V3 on MLX (`parakeet-mlx`) |
-| `wispa/cleaner.py` | Ollama cleanup pass, graceful fallback to raw |
+| `wispa/cleaner.py` | skip-gate, chunked-parallel + streaming Ollama cleanup, dictionary prompt, graceful fallback to raw |
 | `wispa/injector.py` | AX `kAXSelectedTextAttribute` insertion, paste fallback |
 | `wispa/appcontext.py` | frontmost app name → tone context for the LLM |
 | `wispa/overlay.py` | Wispr-style pill at screen bottom: live waveform while recording, pulse while processing |

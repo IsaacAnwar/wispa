@@ -29,7 +29,8 @@ from AppKit import (
 
 WIDTH, HEIGHT = 96, 22
 MARGIN_BOTTOM = 40
-WAVE_POINTS = 48
+PIXEL = 2.0  # side of one square "pixel"
+GAP = 0.8  # spacing between pixels
 FPS = 30.0
 
 
@@ -44,9 +45,7 @@ class _PillView(NSView):
 
     def drawRect_(self, rect):
         bounds = self.bounds()
-        pill = NSBezierPath.bezierPathWithRoundedRect_xRadius_yRadius_(
-            bounds, HEIGHT / 2, HEIGHT / 2
-        )
+        pill = NSBezierPath.bezierPathWithRect_(bounds)
         NSColor.colorWithCalibratedWhite_alpha_(0.08, 0.92).setFill()
         pill.fill()
 
@@ -55,31 +54,36 @@ class _PillView(NSView):
         pad = 12.0
         usable = WIDTH - 2 * pad
         cy = HEIGHT / 2
+        step = PIXEL + GAP
+        cols = int(usable // step)
+        # How many pixels can stack above/below the center row
+        max_steps = int((cy - 2) // step)
 
         if self.mode == "recording":
-            # Amplitude follows the last few mic levels, smoothed
-            recent = levels[-6:] if levels else [0.0]
-            lvl = max(0.0, sum(recent) / len(recent) - 0.004)
-            amp = 1.5 + min(lvl * 90, cy - 5)
-            speed, cycles = 14.0, 2.5
+            # Peak (not average) of the freshest chunks so each syllable lands,
+            # with compressive gain so quiet speech still moves the pixels
+            recent = levels[-4:] if levels else [0.0]
+            lvl = min((max(0.0, max(recent) - 0.003) * 18) ** 0.7, 1.0)
+            speed = 18.0
         else:  # processing: calm steady ripple
-            amp = 2.2
-            speed, cycles = 6.0, 2.5
+            lvl = 0.35
+            speed = 5.0
 
-        wave = NSBezierPath.bezierPath()
-        wave.setLineWidth_(1.6)
-        wave.setLineCapStyle_(1)  # round
-        for i in range(WAVE_POINTS):
-            t = i / (WAVE_POINTS - 1)
-            envelope = math.sin(t * math.pi)  # pinch the wave at both ends
-            y = cy + amp * envelope * math.sin(t * cycles * 2 * math.pi - now * speed)
-            x = pad + t * usable
-            if i == 0:
-                wave.moveToPoint_((x, y))
-            else:
-                wave.lineToPoint_((x, y))
-        NSColor.colorWithCalibratedWhite_alpha_(1.0, 0.9).setStroke()
-        wave.stroke()
+        NSColor.colorWithCalibratedWhite_alpha_(1.0, 0.9).setFill()
+        for i in range(cols):
+            t = i / max(cols - 1, 1)
+            envelope = math.sin(t * math.pi)  # taper toward the pill's ends
+            # Two out-of-sync sines per column so the jitter never looks looped
+            bounce = (2 + math.sin(now * speed + i * 1.7) + math.sin(now * speed * 1.6 + i * 3.1)) / 4
+            # Level drives the height; bounce only modulates it, so pixels stay
+            # tall while you talk instead of collapsing between beats.
+            # Quantize to whole pixels — this is what makes it read as 8-bit
+            n = round(envelope * lvl * (0.45 + 0.55 * bounce) * max_steps + 0.3)
+            x = pad + i * step
+            for k in range(-n, n + 1):  # mirrored around the center row
+                y = cy - PIXEL / 2 + k * step
+                pixel = NSBezierPath.bezierPathWithRect_(NSMakeRect(x, y, PIXEL, PIXEL))
+                pixel.fill()
 
     def tick_(self, timer):
         self.setNeedsDisplay_(True)

@@ -64,3 +64,36 @@ def insert(text: str, method: str = "ax", restore_clipboard: bool = True) -> str
         return "ax"
     insert_via_paste(text, restore_clipboard)
     return "paste"
+
+
+class StreamInserter:
+    """Inserts text at the caret as it streams in.
+
+    Each feed() tries direct AX insertion (the caret advances after every
+    insert, so successive pieces append naturally). The moment AX fails —
+    unsupported app, focus lost — we stop streaming and buffer the remainder,
+    which finish() inserts in one go with the usual paste fallback.
+    """
+
+    def __init__(self, method: str = "ax", restore_clipboard: bool = True):
+        self._method = method
+        self._restore_clipboard = restore_clipboard
+        self._buffering = method != "ax"
+        self._pending: list[str] = []
+        self.received = False
+        self.streamed = False
+
+    def feed(self, piece: str):
+        self.received = True
+        if not self._buffering and insert_via_ax(piece):
+            self.streamed = True
+            return
+        self._buffering = True
+        self._pending.append(piece)
+
+    def finish(self) -> str:
+        """Insert anything buffered; returns a label for how text went in."""
+        if self._pending:
+            path = insert("".join(self._pending), self._method, self._restore_clipboard)
+            return f"ax-stream+{path}" if self.streamed else path
+        return "ax-stream" if self.streamed else "none"

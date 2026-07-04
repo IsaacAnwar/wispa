@@ -16,7 +16,16 @@ class App:
         self.cfg = cfg
         self.recorder = Recorder()
         self.transcriber = Transcriber(cfg.asr.model)
-        self.cleaner = Cleaner(cfg.cleanup.model, cfg.cleanup.timeout) if cfg.cleanup.enabled else None
+        self.cleaner = (
+            Cleaner(
+                cfg.cleanup.model,
+                cfg.cleanup.timeout,
+                dictionary=cfg.dictionary.terms,
+                skip_when_clean=cfg.cleanup.skip_when_clean,
+            )
+            if cfg.cleanup.enabled
+            else None
+        )
         self.overlay = None  # created on the main thread in run()
 
     def warm_up(self):
@@ -59,14 +68,21 @@ class App:
                 print("  (heard nothing)")
                 return
 
+            inserter = injector.StreamInserter(
+                self.cfg.injection.method, self.cfg.injection.restore_clipboard
+            )
             text, was_cleaned = (transcript, False)
             llm_ms = 0.0
             if self.cleaner:
                 t1 = time.perf_counter()
-                text, was_cleaned = self.cleaner.clean(transcript, app_name)
+                text, was_cleaned = self.cleaner.clean_stream(
+                    transcript, app_name, on_text=inserter.feed
+                )
                 llm_ms = (time.perf_counter() - t1) * 1000
-
-            path = injector.insert(text, self.cfg.injection.method, self.cfg.injection.restore_clipboard)
+            if not inserter.received:
+                # Cleanup disabled, skip-gate hit, or total failure: insert whole
+                inserter.feed(text)
+            path = inserter.finish()
 
             print(f"  {text}")
             print(

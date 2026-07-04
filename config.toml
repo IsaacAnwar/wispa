@@ -17,6 +17,21 @@ enabled = true
 model = "qwen3:4b-instruct"
 # If Ollama doesn't answer within this many seconds, fall back to the raw transcript
 timeout = 6.0
+# Skip the LLM when the transcript has no filler/self-correction cues (0ms path).
+# Set to false if dictionary repair matters more than speed on clean sentences.
+skip_when_clean = true
+
+[dictionary]
+# Domain terms the cleanup model should spell correctly and repair
+# mis-transcriptions toward ("laura adapters" -> "LoRA adapters")
+terms = [
+    "LoRA", "PEFT", "RLHF", "SFT", "ASR", "LLM", "MLX", "GGUF",
+    "logits", "softmax", "tokenizer", "embeddings", "transformer",
+    "fine-tuning", "quantization", "inference", "attention", "KV cache",
+    "agentic", "guardrails", "RAG", "prompt engineering", "few-shot",
+    "Ollama", "qwen", "Parakeet", "Whisper", "PyTorch", "Hugging Face",
+    "CareerOS",
+]
 
 [injection]
 # "ax" tries direct insertion via the Accessibility API, falling back to paste.
