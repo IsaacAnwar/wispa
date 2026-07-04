@@ -1,0 +1,112 @@
+"""wispa — local Wispr Flow. Hold the hotkey, talk, release, text appears."""
+
+import sys
+import threading
+import time
+
+from . import appcontext, config, injector
+from .cleaner import Cleaner
+from .hotkey import PushToTalkListener
+from .recorder import SAMPLE_RATE, Recorder
+from .transcriber import Transcriber
+
+
+class App:
+    def __init__(self, cfg: config.Config):
+        self.cfg = cfg
+        self.recorder = Recorder()
+        self.transcriber = Transcriber(cfg.asr.model)
+        self.cleaner = Cleaner(cfg.cleanup.model, cfg.cleanup.timeout) if cfg.cleanup.enabled else None
+        self.overlay = None  # created on the main thread in run()
+
+    def warm_up(self):
+        print("Loading ASR model (downloads ~600MB on first run)...", flush=True)
+        seconds = self.transcriber.load()
+        print(f"ASR ready in {seconds:.1f}s.")
+        if self.cleaner:
+            print(f"Cleanup: {self.cfg.cleanup.model} via Ollama (falls back to raw transcript if unavailable).")
+        else:
+            print("Cleanup: disabled.")
+
+    # Hotkey callbacks arrive on the main thread (the tap lives in the main run loop)
+
+    def on_press(self):
+        # Capture the target app now — focus can change while we process
+        self._app_name = appcontext.frontmost_app_name()
+        self.recorder.start()
+        self.overlay.show_recording()
+        print(f"\n● recording (into {self._app_name})...", flush=True)
+
+    def on_release(self):
+        audio = self.recorder.stop()
+        duration = len(audio) / SAMPLE_RATE
+        if duration < self.cfg.min_duration:
+            self.overlay.hide()
+            print("  (too short, ignored)")
+            return
+        self.overlay.show_processing()
+        # Process off the main thread so we never stall keyboard/UI events
+        threading.Thread(target=self._process, args=(audio, duration, self._app_name), daemon=True).start()
+
+    def _process(self, audio, duration, app_name):
+        from PyObjCTools import AppHelper
+
+        try:
+            t0 = time.perf_counter()
+            transcript = self.transcriber.transcribe(audio)
+            asr_ms = (time.perf_counter() - t0) * 1000
+            if not transcript:
+                print("  (heard nothing)")
+                return
+
+            text, was_cleaned = (transcript, False)
+            llm_ms = 0.0
+            if self.cleaner:
+                t1 = time.perf_counter()
+                text, was_cleaned = self.cleaner.clean(transcript, app_name)
+                llm_ms = (time.perf_counter() - t1) * 1000
+
+            path = injector.insert(text, self.cfg.injection.method, self.cfg.injection.restore_clipboard)
+
+            print(f"  {text}")
+            print(
+                f"  [{duration:.1f}s audio | asr {asr_ms:.0f}ms | "
+                f"llm {llm_ms:.0f}ms{'' if was_cleaned else ' (raw)'} | inserted via {path}]"
+            )
+        finally:
+            # UI work must happen on the main thread
+            AppHelper.callAfter(self.overlay.hide)
+
+    def run(self):
+        from AppKit import NSApplication, NSApplicationActivationPolicyAccessory
+        from PyObjCTools import AppHelper
+
+        from .overlay import Overlay
+
+        self.warm_up()
+
+        app = NSApplication.sharedApplication()
+        app.setActivationPolicy_(NSApplicationActivationPolicyAccessory)
+        self.overlay = Overlay(level_source=lambda: self.recorder.levels)
+
+        listener = PushToTalkListener(self.cfg.hotkey, self.on_press, self.on_release)
+        listener.install()
+
+        pretty = {"fn": "Fn", "right_option": "Right Option", "ctrl_option": "Ctrl+Option"}[self.cfg.hotkey]
+        print(f"\nHold {pretty} and speak. Release to insert. Ctrl+C here to quit.")
+        AppHelper.runEventLoop(installInterrupt=True)
+
+
+def run():
+    # Line-buffer stdout even when redirected, so status lines appear live
+    sys.stdout.reconfigure(line_buffering=True)
+    cfg = config.load()
+    try:
+        App(cfg).run()
+    except PermissionError as e:
+        print(f"\n{e}", file=sys.stderr)
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    run()

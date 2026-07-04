@@ -1,0 +1,25 @@
+# wispa configuration
+
+# Push-to-talk key: "fn" | "right_option" | "ctrl_option"
+hotkey = "fn"
+
+# Ignore recordings shorter than this (accidental taps), in seconds
+min_duration = 0.3
+
+[asr]
+model = "mlx-community/parakeet-tdt-0.6b-v3"
+
+[cleanup]
+# Set to false to always inject the raw transcript
+enabled = true
+# Any model you've pulled in Ollama. Use an instruct-only (non-thinking) model —
+# thinking models burn seconds of latency on chain-of-thought before answering.
+model = "qwen3:4b-instruct"
+# If Ollama doesn't answer within this many seconds, fall back to the raw transcript
+timeout = 6.0
+
+[injection]
+# "ax" tries direct insertion via the Accessibility API, falling back to paste.
+# "paste" always uses clipboard + Cmd+V.
+method = "ax"
+restore_clipboard = true
