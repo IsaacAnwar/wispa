@@ -45,7 +45,7 @@ class _PillView(NSView):
 
     def drawRect_(self, rect):
         bounds = self.bounds()
-        pill = NSBezierPath.bezierPathWithRect_(bounds)
+        pill = NSBezierPath.bezierPathWithRoundedRect_xRadius_yRadius_(bounds, 5, 5)
         NSColor.colorWithCalibratedWhite_alpha_(0.08, 0.92).setFill()
         pill.fill()
 
