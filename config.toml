@@ -29,8 +29,8 @@ terms = [
     "logits", "softmax", "tokenizer", "embeddings", "transformer",
     "fine-tuning", "quantization", "inference", "attention", "KV cache",
     "agentic", "guardrails", "RAG", "prompt engineering", "few-shot",
-    "Ollama", "qwen", "Parakeet", "Whisper", "PyTorch", "Hugging Face",
-    "CareerOS",
+    "Ollama", "qwen", "PyTorch", "Hugging Face", "GRPO", "PPO",
+    "Alinia"
 ]
 
 [injection]

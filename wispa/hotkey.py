@@ -48,19 +48,35 @@ class PushToTalkListener:
         self._on_release = on_release
         self._held = False
 
-    def _callback(self, proxy, event_type, event, refcon):
-        # macOS disables a tap that stalls or after a wake; re-enable and move on.
-        if event_type in (Quartz.kCGEventTapDisabledByTimeout, Quartz.kCGEventTapDisabledByUserInput):
-            Quartz.CGEventTapEnable(self._tap, True)
-            return event
-        flags = Quartz.CGEventGetFlags(event)
-        down = self._detect(flags)
+    def _update(self, down: bool):
+        """on_press/on_release MUST return fast — the tap callback runs inside
+        macOS's tap timeout budget, and a slow callback gets the tap disabled
+        (losing events, including the release)."""
         if down and not self._held:
             self._held = True
             self._on_press()
         elif not down and self._held:
             self._held = False
             self._on_release()
+
+    def hotkey_currently_down(self) -> bool:
+        """Ground truth from the HID system, independent of tap events."""
+        flags = Quartz.CGEventSourceFlagsState(Quartz.kCGEventSourceStateCombinedSessionState)
+        return self._detect(flags)
+
+    def resync(self):
+        """Realign held-state with the actual keyboard — fires the missed
+        press/release callback if a tap outage swallowed the event."""
+        self._update(self.hotkey_currently_down())
+
+    def _callback(self, proxy, event_type, event, refcon):
+        # macOS disables a tap that stalls or after a wake; re-enable and
+        # resync, since events (like the release) were lost while it was off.
+        if event_type in (Quartz.kCGEventTapDisabledByTimeout, Quartz.kCGEventTapDisabledByUserInput):
+            Quartz.CGEventTapEnable(self._tap, True)
+            self.resync()
+            return event
+        self._update(self._detect(Quartz.CGEventGetFlags(event)))
         return event
 
     def install(self):

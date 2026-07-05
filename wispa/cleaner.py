@@ -24,6 +24,9 @@ MAX_SINGLE_WORDS = 45
 TARGET_CHUNK_WORDS = 40
 MAX_CHUNKS = 4
 
+# Max silence between streamed pieces before we assume the model hung
+STALL_TIMEOUT = 5.0
+
 # Cues that the transcript actually needs the LLM. Errs toward cleaning:
 # a false positive costs one LLM call, a false negative types "um" into Slack.
 _CUES = [
@@ -84,6 +87,14 @@ class Cleaner:
     @staticmethod
     def needs_cleanup(transcript: str) -> bool:
         return NEEDS_CLEANUP_RE.search(transcript) is not None
+
+    def warm(self):
+        """Tiny request so the model is loaded before the first real dictation
+        (a cold load costs ~4-5s). Swallows errors — Ollama may be down."""
+        try:
+            self._call("um warm up", "Notes")
+        except Exception:
+            pass
 
     def _call(self, transcript: str, app_name: str, emit: Optional[Callable[[str], None]] = None) -> str:
         import ollama
@@ -202,7 +213,6 @@ class Cleaner:
         for chunk, q in zip(chunks, channels):
             self._pool.submit(worker, chunk, q)
 
-        deadline = time.monotonic() + self.timeout
         parts: list[str] = []
         any_failed = False
         emitted_any = False
@@ -211,8 +221,13 @@ class Cleaner:
             got = ""
             failed = False
             while True:
+                # Timeout bounds STALLS, not total time: waiting for the first
+                # piece gets self.timeout (covers a model cold-load); once
+                # pieces flow, an actively-generating stream is never cut —
+                # killing it mid-chunk loses the user's words.
+                wait = self.timeout if not got else STALL_TIMEOUT
                 try:
-                    item = q.get(timeout=max(0.0, deadline - time.monotonic()))
+                    item = q.get(timeout=wait)
                 except queue.Empty:
                     failed = True
                     break
@@ -221,6 +236,19 @@ class Cleaner:
                 if item is _FAILED:
                     failed = True
                     break
+                # Coalesce whatever else is already queued into one piece —
+                # insertion (AX calls) can be slower than generation, and one
+                # bigger insert beats many tiny ones
+                sentinel = None
+                while True:
+                    try:
+                        nxt = q.get_nowait()
+                    except queue.Empty:
+                        break
+                    if nxt is _DONE or nxt is _FAILED:
+                        sentinel = nxt
+                        break
+                    item += nxt
                 piece = item if got else item.lstrip()
                 if len(got) + len(piece) > cap:
                     failed = True
@@ -231,6 +259,11 @@ class Cleaner:
                         piece = " " + piece
                     on_text(piece)
                     emitted_any = True
+                if sentinel is _DONE:
+                    break
+                if sentinel is _FAILED:
+                    failed = True
+                    break
             if failed:
                 any_failed = True
                 # Fall back to the raw chunk; emit it so streaming stays coherent

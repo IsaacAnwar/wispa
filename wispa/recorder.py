@@ -17,6 +17,10 @@ class Recorder:
         # Rolling RMS levels for the waveform overlay (~50ms per chunk)
         self.levels: deque[float] = deque(maxlen=64)
 
+    @property
+    def is_recording(self) -> bool:
+        return self._stream is not None
+
     def start(self):
         with self._lock:
             if self._stream is not None:
