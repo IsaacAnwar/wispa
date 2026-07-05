@@ -34,6 +34,9 @@ class App:
         self._insert_exec = concurrent.futures.ThreadPoolExecutor(max_workers=1)
 
     def warm_up(self):
+        # Persistent mic stream: avoids the 70-150ms open cost on key-press
+        # that was cutting off the first syllables (mic indicator stays on)
+        self.recorder.open()
         print("Loading ASR model (downloads ~600MB on first run)...", flush=True)
         seconds = self.transcriber.load()
         print(f"ASR ready in {seconds:.1f}s.")
