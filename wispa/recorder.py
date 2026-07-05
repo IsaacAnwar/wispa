@@ -16,7 +16,9 @@ import numpy as np
 import sounddevice as sd
 
 SAMPLE_RATE = 16000
-PRE_ROLL_S = 0.3
+# People often start talking before their finger lands on the key —
+# generously long pre-roll; ASR shrugs off the extra leading audio
+PRE_ROLL_S = 0.6
 
 
 class Recorder:

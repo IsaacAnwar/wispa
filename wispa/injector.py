@@ -37,6 +37,13 @@ def _caret_position(element):
     return int(location + length)
 
 
+def _range_settable(element) -> bool:
+    err, settable = AX.AXUIElementIsAttributeSettable(
+        element, AX.kAXSelectedTextRangeAttribute, None
+    )
+    return err == AX.kAXErrorSuccess and bool(settable)
+
+
 def _set_caret(element, location) -> bool:
     value = AX.AXValueCreate(_CFRANGE_TYPE, (location, 0))
     if value is None:
@@ -131,13 +138,25 @@ class StreamInserter:
             return
         t0 = time.perf_counter()
         if self._element is None:
-            self._element = _focused_element()
+            element = _focused_element()
+            # Probe BEFORE the first insert: streaming is only safe if we can
+            # both read and set the caret — otherwise a piece could land and
+            # leave the caret behind it, putting the pasted remainder in front
+            # of it (reads like the start of the text went missing).
+            if (
+                element is None
+                or _caret_position(element) is None
+                or not _range_settable(element)
+            ):
+                self._buffering = True
+                self._pending.append(piece)
+                return
+            self._element = element
         element = self._element
         before = self._expected
         if before is None:
-            before = _caret_position(element) if element is not None else None
+            before = _caret_position(element)
         if before is None:
-            # Can't verify ordering in this app — don't stream blind
             self._buffering = True
             self._pending.append(piece)
             return
